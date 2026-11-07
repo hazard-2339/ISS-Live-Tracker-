@@ -33,4 +33,14 @@ def show_position():
     )
 
 
-show_position()
+show_position(    lat = position.latitude
+    lon = position.longitude
+
+    col1, col2 = st.columns(2)
+    col1.metric("Latitude", f"{lat:.4f}")
+    col2.metric("Longitude", f"{lon:.4f}")
+
+    col3, col4 = st.columns(2)
+    col3.metric("Altitude", f"{position.altitude_km:.1f} km")
+    col4.metric("Speed", f"{position.velocity_kmh:,.0f} km/h")
+    )
