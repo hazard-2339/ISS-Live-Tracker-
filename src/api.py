@@ -22,7 +22,7 @@ def _number(data: dict, key: str, low: float, high: float) -> float:
 
 def parse_position(data: object) -> IssPosition:
     if not isinstance(data, dict):
-        raise ValueError("The API response must be a JSON object.")
+        raise TypeError("The API response must be a JSON object.")
     return IssPosition(
         latitude=_number(data, "latitude", -90, 90),
         longitude=_number(data, "longitude", -180, 180),

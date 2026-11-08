@@ -9,3 +9,10 @@ class IssPosition:
     velocity_kmh: float
     timestamp: int
 
+@dataclass(frozen=True)
+class GroundPoint:
+    latitude: float
+    longitude: float
+    altitude_km: float
+    timestamp: int
+

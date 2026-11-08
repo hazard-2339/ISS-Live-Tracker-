@@ -50,7 +50,7 @@ def test_parse_rejects_bad_values(key, bad_value):
 
 
 def test_parse_rejects_non_object():
-    with pytest.raises(ValueError):
+    with pytest.raises(TypeError):
         parse_position([1, 2, 3])
 
 

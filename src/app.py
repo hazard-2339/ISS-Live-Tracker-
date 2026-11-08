@@ -1,5 +1,6 @@
 import streamlit as st
 import streamlit.components.v1 as components
+import requests    
 
 from src.api import get_iss_position
 
@@ -11,7 +12,7 @@ st.title("ISS Live Tracker")
 def show_position():
     try:
         position = get_iss_position()
-    except Exception as error:
+       except (requests.RequestException, ValueError, TypeError) as error:
         st.error(f"Could not fetch the ISS position: {error}")
         return
 
