@@ -20,6 +20,8 @@ def test_ground_track_covers_about_one_orbit():
     assert len(track) == 96
     assert all(abs(p.latitude) <= 52.0 for p in track)
 
+    
+
 def test_distance_zero_and_known_value():
     assert distance_km(10, 20, 10, 20) == 0
     # one degree of latitude is roughly 111 km
