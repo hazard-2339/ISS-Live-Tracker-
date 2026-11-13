@@ -77,6 +77,20 @@ def ground_track(
     ]
 
 
+def split_at_antimeridian(points: list[GroundPoint]) -> list[list[GroundPoint]]:
+    """Break a track wherever it crosses longitude +/-180."""
+    segments: list[list[GroundPoint]] = []
+    current: list[GroundPoint] = []
+    for point in points:
+        if current and abs(point.longitude - current[-1].longitude) > 180:
+            segments.append(current)
+            current = []
+        current.append(point)
+    if current:
+        segments.append(current)
+    return segments
+
+
 def distance_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Great-circle (haversine) distance between two surface points."""
     p1, p2 = math.radians(lat1), math.radians(lat2)
