@@ -26,3 +26,16 @@ def test_distance_zero_and_known_value():
     assert distance_km(10, 20, 10, 20) == 0
     # one degree of latitude is roughly 111 km
     assert 110 < distance_km(0, 0, 1, 0) < 112
+
+def split_at_antimeridian(points: list[GroundPoint]) -> list[list[GroundPoint]]:
+    """Break a track wherever it crosses longitude +/-180, so lines don't streak across the map."""
+    segments: list[list[GroundPoint]] = []
+    current: list[GroundPoint] = []
+    for point in points:
+        if current and abs(point.longitude - current[-1].longitude) > 180:
+            segments.append(current)
+            current = []
+        current.append(point)
+    if current:
+        segments.append(current)
+    return segments    
