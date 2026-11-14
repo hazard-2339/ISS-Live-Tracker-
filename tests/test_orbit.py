@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from src.models import GroundPoint
 from src.orbit import (
@@ -11,7 +11,7 @@ from src.orbit import (
 
 LINE1 = "1 25544U 98067A   19343.69339541  .00001764  00000-0  38792-4 0  9991"
 LINE2 = "2 25544  51.6439 211.2001 0007417  17.6667  85.6398 15.50103472202482"
-EPOCH = datetime(2019, 12, 9, 16, 38, 29, tzinfo=timezone.utc)
+EPOCH = datetime(2019, 12, 9, 16, 38, 29, tzinfo=UTC)
 
 
 def test_position_is_physically_plausible():

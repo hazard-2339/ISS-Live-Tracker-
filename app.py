@@ -1,4 +1,4 @@
-﻿from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 
 import requests
 import streamlit as st
@@ -27,12 +27,12 @@ def load_satellite():
 
 @st.cache_data(ttl=60)
 def predicted_track():
-    return ground_track(load_satellite(), datetime.now(timezone.utc))
+    return ground_track(load_satellite(), datetime.now(UTC))
 
 
 @st.cache_data(ttl=600)
 def upcoming_passes(lat: float, lon: float):
-    return find_passes(load_satellite(), lat, lon, datetime.now(timezone.utc))
+    return find_passes(load_satellite(), lat, lon, datetime.now(UTC))
 
 
 @st.fragment(run_every=5)
@@ -56,7 +56,7 @@ def show_position():
 
     segments = []
     try:
-        when = datetime.fromtimestamp(position.timestamp, timezone.utc)
+        when = datetime.fromtimestamp(position.timestamp, UTC)
         predicted = position_at(load_satellite(), when)
         gap = distance_km(lat, lon, predicted.latitude, predicted.longitude)
         st.caption(f"Orbit model check: my SGP4 calculation is {gap:.1f} km from the API reading.")

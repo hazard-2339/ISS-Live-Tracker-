@@ -1,5 +1,5 @@
-﻿import math
-from datetime import datetime, timedelta, timezone
+import math
+from datetime import UTC, datetime, timedelta
 
 import requests
 from sgp4.api import Satrec, jday
@@ -31,7 +31,7 @@ def build_satellite(line1: str, line2: str) -> Satrec:
 
 def _ecef_km(satellite: Satrec, when: datetime) -> tuple[float, float, float]:
     """Satellite position in Earth-fixed Cartesian coordinates (km)."""
-    when = when.astimezone(timezone.utc)
+    when = when.astimezone(UTC)
     seconds = when.second + when.microsecond / 1e6
     jd, fr = jday(when.year, when.month, when.day, when.hour, when.minute, seconds)
 
@@ -77,7 +77,7 @@ def ground_track(
     start_ts = start.timestamp()
     steps = (minutes * 60) // step_seconds + 1
     return [
-        position_at(satellite, datetime.fromtimestamp(start_ts + i * step_seconds, timezone.utc))
+        position_at(satellite, datetime.fromtimestamp(start_ts + i * step_seconds, UTC))
         for i in range(steps)
     ]
 
