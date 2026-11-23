@@ -1,23 +1,37 @@
 import math
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
 import requests
 from sgp4.api import Satrec, jday
 from sgp4.propagation import gstime
 
-from src.models import GroundPoint, SkyPass
+from src.config import (
+    DEFAULT_CATALOG_NUMBER,
+    EDGE_TOLERANCE_SECONDS,
+    MIN_PASS_ELEVATION_DEG,
+    PASS_SCAN_STEP_SECONDS,
+    REQUEST_TIMEOUT_SECONDS,
+    TLE_URL_TEMPLATE,
+)
+from src.models import GroundPoint, LookAngles, SkyPass
 
-TLE_URL = "https://celestrak.org/NORAD/elements/gp.php?CATNR=25544&FORMAT=tle"
-TIMEOUT_SECONDS = 10
 EARTH_RADIUS_KM = 6371.0
 
 # WGS84 ellipsoid
 WGS84_A = 6378.137
 WGS84_E2 = (1 / 298.257223563) * (2 - 1 / 298.257223563)
 
+COMPASS_POINTS = (
+    "N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
+    "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW",
+)
+DEGREES_PER_COMPASS_POINT = 360 / len(COMPASS_POINTS)
 
-def fetch_tle() -> tuple[str, str]:
-    response = requests.get(TLE_URL, timeout=TIMEOUT_SECONDS)
+
+def fetch_tle(catalog_number: int = DEFAULT_CATALOG_NUMBER) -> tuple[str, str]:
+    url = TLE_URL_TEMPLATE.format(catalog_number=catalog_number)
+    response = requests.get(url, timeout=REQUEST_TIMEOUT_SECONDS)
     response.raise_for_status()
     lines = [line.strip() for line in response.text.splitlines() if line.strip()]
     if len(lines) < 2 or not lines[-2].startswith("1 ") or not lines[-1].startswith("2 "):
@@ -105,27 +119,99 @@ def distance_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return 2 * EARTH_RADIUS_KM * math.asin(math.sqrt(a))
 
 
-def elevation_deg(
-    satellite: Satrec, when: datetime, obs_lat: float, obs_lon: float
-) -> float:
-    """Angle of the satellite above the observer's horizon, in degrees."""
-    sx, sy, sz = _ecef_km(satellite, when)
+def compass_point(azimuth_deg: float) -> str:
+    """Turn a bearing in degrees (0 = north, clockwise) into N, NNE, NE, ..."""
+    index = round((azimuth_deg % 360) / DEGREES_PER_COMPASS_POINT) % len(COMPASS_POINTS)
+    return COMPASS_POINTS[index]
+
+
+def observer_ecef_km(lat_deg: float, lon_deg: float) -> tuple[float, float, float]:
+    """Earth-fixed position of a point on the WGS84 surface."""
+    phi, lam = math.radians(lat_deg), math.radians(lon_deg)
+    n = WGS84_A / math.sqrt(1 - WGS84_E2 * math.sin(phi) ** 2)
+    return (
+        n * math.cos(phi) * math.cos(lam),
+        n * math.cos(phi) * math.sin(lam),
+        n * (1 - WGS84_E2) * math.sin(phi),
+    )
+
+
+def look_angles_from_ecef(
+    sat_xyz: tuple[float, float, float], obs_lat: float, obs_lon: float
+) -> LookAngles:
+    """Elevation and azimuth of a point, seen from an observer on the ground."""
+    ox, oy, oz = observer_ecef_km(obs_lat, obs_lon)
+    dx, dy, dz = sat_xyz[0] - ox, sat_xyz[1] - oy, sat_xyz[2] - oz
 
     phi, lam = math.radians(obs_lat), math.radians(obs_lon)
-    n = WGS84_A / math.sqrt(1 - WGS84_E2 * math.sin(phi) ** 2)
-    ox = n * math.cos(phi) * math.cos(lam)
-    oy = n * math.cos(phi) * math.sin(lam)
-    oz = n * (1 - WGS84_E2) * math.sin(phi)
-
-    dx, dy, dz = sx - ox, sy - oy, sz - oz
-    # Component of the look vector along the local "Up" direction.
+    east = -math.sin(lam) * dx + math.cos(lam) * dy
+    north = (
+        -math.sin(phi) * math.cos(lam) * dx
+        - math.sin(phi) * math.sin(lam) * dy
+        + math.cos(phi) * dz
+    )
     up = (
         math.cos(phi) * math.cos(lam) * dx
         + math.cos(phi) * math.sin(lam) * dy
         + math.sin(phi) * dz
     )
+
     distance = math.sqrt(dx**2 + dy**2 + dz**2)
-    return math.degrees(math.asin(up / distance))
+    sine_elevation = max(-1.0, min(1.0, up / distance))  # guard against rounding error
+    return LookAngles(
+        elevation_deg=math.degrees(math.asin(sine_elevation)),
+        azimuth_deg=math.degrees(math.atan2(east, north)) % 360,
+    )
+
+
+def look_angles(
+    satellite: Satrec, when: datetime, obs_lat: float, obs_lon: float
+) -> LookAngles:
+    return look_angles_from_ecef(_ecef_km(satellite, when), obs_lat, obs_lon)
+
+
+def elevation_deg(
+    satellite: Satrec, when: datetime, obs_lat: float, obs_lon: float
+) -> float:
+    """Angle of the satellite above the observer's horizon, in degrees."""
+    return look_angles(satellite, when, obs_lat, obs_lon).elevation_deg
+
+
+def refine_crossing(
+    is_above: Callable[[datetime], bool],
+    t_below: datetime,
+    t_above: datetime,
+    tolerance_seconds: float = EDGE_TOLERANCE_SECONDS,
+) -> datetime:
+    """Bisection: find where `is_above` flips, given one time where it is False
+    (`t_below`) and one where it is True (`t_above`, either side of it).
+
+    Returns the True-side time, within `tolerance_seconds` of the true crossing.
+    """
+    while abs((t_above - t_below).total_seconds()) > tolerance_seconds:
+        middle = t_below + (t_above - t_below) / 2
+        if is_above(middle):
+            t_above = middle
+        else:
+            t_below = middle
+    return t_above
+
+
+def refine_peak(
+    value_at: Callable[[datetime], float],
+    t_low: datetime,
+    t_high: datetime,
+    tolerance_seconds: float = EDGE_TOLERANCE_SECONDS,
+) -> datetime:
+    """Ternary search for the time of the maximum, assuming a single peak in range."""
+    while (t_high - t_low).total_seconds() > tolerance_seconds:
+        third = (t_high - t_low) / 3
+        first, second = t_low + third, t_high - third
+        if value_at(first) < value_at(second):
+            t_low = first
+        else:
+            t_high = second
+    return t_low + (t_high - t_low) / 2
 
 
 def find_passes(
@@ -134,28 +220,59 @@ def find_passes(
     obs_lon: float,
     start: datetime,
     hours: int = 24,
-    step_seconds: int = 30,
-    min_elevation: float = 10.0,
+    step_seconds: int = PASS_SCAN_STEP_SECONDS,
+    min_elevation: float = MIN_PASS_ELEVATION_DEG,
+    tolerance_seconds: float = EDGE_TOLERANCE_SECONDS,
 ) -> list[SkyPass]:
-    """Find periods when the satellite is above `min_elevation` for the observer."""
+    """Find periods above `min_elevation`, with edge times refined by bisection."""
+
+    def angles_at(when: datetime) -> LookAngles:
+        return look_angles(satellite, when, obs_lat, obs_lon)
+
+    def elevation_at(when: datetime) -> float:
+        return angles_at(when).elevation_deg
+
+    def is_above(when: datetime) -> bool:
+        return elevation_at(when) >= min_elevation
+
+    def build_pass(rise: datetime, peak_sample: datetime, end: datetime) -> SkyPass:
+        step = timedelta(seconds=step_seconds)
+        peak = refine_peak(elevation_at, peak_sample - step, peak_sample + step, tolerance_seconds)
+        return SkyPass(
+            start=rise,
+            peak=peak,
+            end=end,
+            max_elevation_deg=elevation_at(peak),
+            start_azimuth_deg=angles_at(rise).azimuth_deg,
+            peak_azimuth_deg=angles_at(peak).azimuth_deg,
+            end_azimuth_deg=angles_at(end).azimuth_deg,
+        )
+
     passes: list[SkyPass] = []
-    rise = peak_time = last_above = None
+    rise: datetime | None = None
+    peak_sample = start
     peak_elevation = -90.0
+    previous: datetime | None = None
 
     for i in range(hours * 3600 // step_seconds + 1):
-        t = start + timedelta(seconds=i * step_seconds)
-        elevation = elevation_deg(satellite, t, obs_lat, obs_lon)
+        now = start + timedelta(seconds=i * step_seconds)
+        elevation = elevation_at(now)
 
         if elevation >= min_elevation:
             if rise is None:
-                rise, peak_time, peak_elevation = t, t, elevation
+                if previous is None:  # already in progress when the window opened
+                    rise = now
+                else:
+                    rise = refine_crossing(is_above, previous, now, tolerance_seconds)
+                peak_sample, peak_elevation = now, elevation
             elif elevation > peak_elevation:
-                peak_time, peak_elevation = t, elevation
-            last_above = t
-        elif rise is not None:
-            passes.append(SkyPass(rise, peak_time, last_above, peak_elevation))
+                peak_sample, peak_elevation = now, elevation
+        elif rise is not None and previous is not None:
+            end = refine_crossing(is_above, now, previous, tolerance_seconds)
+            passes.append(build_pass(rise, peak_sample, end))
             rise = None
+        previous = now
 
-    if rise is not None:  # a pass was still in progress when the window ended
-        passes.append(SkyPass(rise, peak_time, last_above, peak_elevation))
+    if rise is not None and previous is not None:  # still in progress at window end
+        passes.append(build_pass(rise, peak_sample, previous))
     return passes
