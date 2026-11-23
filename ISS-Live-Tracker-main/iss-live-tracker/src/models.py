@@ -20,11 +20,20 @@ class GroundPoint:
 
 
 @dataclass(frozen=True)
+class LookAngles:
+    elevation_deg: float
+    azimuth_deg: float
+
+
+@dataclass(frozen=True)
 class SkyPass:
     start: datetime
     peak: datetime
     end: datetime
     max_elevation_deg: float
+    start_azimuth_deg: float
+    peak_azimuth_deg: float
+    end_azimuth_deg: float
 
     @property
     def duration_seconds(self) -> int:
