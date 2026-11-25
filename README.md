@@ -120,4 +120,4 @@ Milestone 1 covers configuration, azimuth and look angles, more precise rise/set
 - Map: Leaflet with OpenStreetMap tiles
 
 ## License
-
+MIT
